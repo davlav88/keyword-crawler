@@ -115,9 +115,13 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
   const root = document.querySelector(selector) || document.body;
   if (!root) return [];
 
+  // Clean up any leftover match tags from a previous run
+  document.querySelectorAll('[data-kc-match]').forEach((el) => el.removeAttribute('data-kc-match'));
+
   const textNodes = getTextNodes(root, maxNodes);
   const matches = [];
   const flags = ignoreCase ? 'gi' : 'g';
+  let matchId = 0;
 
   for (const keyword of keywords) {
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -132,6 +136,10 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
         if (!parent) continue;
         if (!isVisible(parent)) continue;
 
+        // Tag the element with a unique ID so screenshots can reliably find it
+        const id = `kc-${matchId++}`;
+        parent.setAttribute('data-kc-match', id);
+
         const sel = buildSelector(parent);
         const rawHTML = parent.outerHTML;
         const nodeHTML = rawHTML.length > 500 ? rawHTML.slice(0, 497) + '…' : rawHTML;
@@ -141,6 +149,7 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
           keyword,
           matchedText: m[0],
           selector: sel,
+          matchId: id,
           nodeHTML,
           context,
         });
@@ -184,6 +193,7 @@ export async function searchPage(page, pageUrl, keywords, opts) {
     keyword: m.keyword,
     matchedText: m.matchedText,
     selector: m.selector,
+    matchId: m.matchId,
     nodeHTML: m.nodeHTML,
     context: m.context,
     screenshotFile: null,

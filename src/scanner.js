@@ -144,13 +144,16 @@ async function scanPage(browser, url, keywords, options) {
         match.screenshotFile = await screenshotElement(
           page,
           match.url,
-          match.selector,
+          match.matchId,
           match.keyword,
           idx,
           screenshotsDir,
         );
       }
     }
+
+    // Strip internal matchId from output — it's not useful in the report
+    for (const match of matches) delete match.matchId;
 
     return { url: finalUrl, matches, error: null };
   } finally {

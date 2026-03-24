@@ -5,17 +5,17 @@ import { hashUrl, slugifyKeyword, warn, verbose } from './utils.js';
 const MAX_ELEMENT_DIMENSION = 2000; // px
 
 /**
- * Capture a screenshot of the DOM element matching `selector` on the given page.
+ * Capture a screenshot of the DOM element tagged with `data-kc-match="${matchId}"`.
  *
  * @param {import('puppeteer').Page} page        Already-navigated Puppeteer page
  * @param {string}  pageUrl                       URL of the page (for filename)
- * @param {string}  selector                      CSS selector of the target element
+ * @param {string}  matchId                       Unique match ID set on the element by the matcher
  * @param {string}  keyword                       Keyword that triggered this match
  * @param {number}  index                         Match index (for unique filenames)
  * @param {string}  screenshotsDir               Absolute path to screenshots directory
  * @returns {Promise<string|null>}               Relative filename, or null on failure
  */
-export async function screenshotElement(page, pageUrl, selector, keyword, index, screenshotsDir) {
+export async function screenshotElement(page, pageUrl, matchId, keyword, index, screenshotsDir) {
   try {
     await fs.mkdir(screenshotsDir, { recursive: true });
 
@@ -24,10 +24,10 @@ export async function screenshotElement(page, pageUrl, selector, keyword, index,
     const filename = `${urlHash}-${kwSlug}-${index}.png`;
     const filepath = path.join(screenshotsDir, filename);
 
-    // Find the element
-    const elementHandle = await page.$(selector);
+    // Find the element by the unique data attribute set during matching
+    const elementHandle = await page.$(`[data-kc-match="${matchId}"]`);
     if (!elementHandle) {
-      verbose(`Screenshot: element not found for selector "${selector}" on ${pageUrl}`);
+      verbose(`Screenshot: element not found for matchId "${matchId}" on ${pageUrl}`);
       return null;
     }
 
@@ -37,7 +37,7 @@ export async function screenshotElement(page, pageUrl, selector, keyword, index,
     // Check element dimensions
     const box = await elementHandle.boundingBox();
     if (!box) {
-      verbose(`Screenshot: could not get bounding box for "${selector}" on ${pageUrl}`);
+      verbose(`Screenshot: could not get bounding box for matchId "${matchId}" on ${pageUrl}`);
       return null;
     }
 
