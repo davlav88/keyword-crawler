@@ -156,7 +156,6 @@ export async function discoverUrls(seedUrls, options) {
     urls: urlList,
     stats: {
       sitemapUrls: totalSitemapRaw,
-      crawledUrls: 0,
       totalUniqueUrls: urlList.length,
       filteredOut: totalFilteredOut,
     },

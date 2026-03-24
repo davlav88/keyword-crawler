@@ -2,15 +2,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import readline from 'readline';
-import { fileURLToPath } from 'url';
 import { Command } from 'commander';
 import { parse } from 'csv-parse/sync';
 import { discoverUrls } from './discovery.js';
 import { scanUrls } from './scanner.js';
 import { writeJsonReport, writeCsvReport, printDiscoverySummary, printScanSummary } from './reporter.js';
 import { setVerbose, normalizeUrl, log, warn, logError } from './utils.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -181,7 +178,6 @@ async function main() {
     totalKeywords: keywords.length,
     discovery: {
       sitemapUrls: stats.sitemapUrls,
-      crawledUrls: stats.crawledUrls,
       totalUniqueUrls: stats.totalUniqueUrls,
       filteredOut: stats.filteredOut,
       urlsScanned: urls.length,
@@ -199,7 +195,7 @@ async function main() {
   await writeJsonReport(outputDir, meta, matches, errors);
   await writeCsvReport(outputDir, matches);
 
-  printScanSummary(urls.length, matches, errors, outputDir, opts.screenshots);
+  printScanSummary(urls.length, matches, errors, outputDir, opts.screenshots, keywords.length);
 }
 
 main().catch((err) => {

@@ -57,10 +57,11 @@ export function printDiscoverySummary(stats, urlsToScan) {
   log(`  URLs to scan:       ${urlsToScan}`);
 }
 
-export function printScanSummary(total, matches, errors, outputDir, screenshotsEnabled) {
+export function printScanSummary(total, matches, errors, outputDir, screenshotsEnabled, keywordsCount) {
   const screenshotCount = matches.filter((m) => m.screenshotFile).length;
   log('\n── Phase 2: Scanning ──');
   log(`  [${total}/${total}] Scanning complete`);
+  log(`  Keywords searched:  ${keywordsCount}`);
   log(`  Total matches:      ${matches.length}`);
   log(`  Errors:             ${errors.length}`);
   log('\n✓ Done');

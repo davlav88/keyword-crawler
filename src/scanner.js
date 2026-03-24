@@ -2,7 +2,7 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { searchPage, searchHtml } from './matcher.js';
 import { screenshotElement } from './screenshotter.js';
-import { workQueue, isHtmlUrl, sleep, log, verbose, warn } from './utils.js';
+import { workQueue, sleep, log, verbose, warn } from './utils.js';
 
 // ── Cookie banner dismissal ───────────────────────────────────────────────────
 
@@ -35,6 +35,20 @@ async function dismissCookieBanner(page) {
   }
 }
 
+// ── Browser launcher with crash recovery ─────────────────────────────────────
+
+async function launchBrowser() {
+  return puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+    ],
+  });
+}
+
 // ── Page loader ───────────────────────────────────────────────────────────────
 
 async function loadPage(browser, url, delay) {
@@ -42,13 +56,11 @@ async function loadPage(browser, url, delay) {
   await page.setUserAgent('KeywordCrawler/1.0');
   await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
-  // Set a reasonable viewport
   await page.setViewport({ width: 1280, height: 900 });
 
   try {
     await sleep(delay);
 
-    // Phase 1: navigate and wait for the initial HTML response.
     // Use 'domcontentloaded' so we aren't blocked by persistent background
     // network activity (analytics, chat widgets, etc.).
     let response;
@@ -81,7 +93,7 @@ async function loadPage(browser, url, delay) {
       throw new Error(`Redirect to different origin: ${finalUrl}`);
     }
 
-    // Phase 2: give JS a moment to render without hard-blocking on network idle.
+    // Give JS a moment to render without hard-blocking on network idle.
     await page.waitForNetworkIdle({ idleTime: 1000, timeout: 5000 }).catch(() => {
       verbose(`Network did not idle on ${url} — proceeding with current DOM`);
     });
@@ -148,6 +160,8 @@ async function scanPage(browser, url, keywords, options) {
 
 // ── Phase 2 entry point ───────────────────────────────────────────────────────
 
+const CLEAR_LINE = '\x1b[2K\r';
+
 /**
  * Scan all URLs for keywords.
  *
@@ -165,35 +179,42 @@ export async function scanUrls(urls, keywords, options) {
   const total = urls.length;
   let done = 0;
 
-  // Launch a single browser instance shared across all pages
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
-  });
+  // Launch a single browser instance shared across all pages.
+  // If the browser crashes mid-scan, we relaunch and continue.
+  let browser = await launchBrowser();
+
+  async function ensureBrowser() {
+    try {
+      // Quick connectivity check
+      await browser.version();
+    } catch {
+      warn('Browser disconnected — relaunching');
+      browser = await launchBrowser();
+    }
+    return browser;
+  }
 
   try {
     await workQueue(urls, concurrency, async (url) => {
       done++;
-      process.stdout.write(`\r  [${done}/${total}] Scanning ${url.slice(0, 80)}`);
+      process.stdout.write(`${CLEAR_LINE}  [${done}/${total}] Scanning ${url.slice(0, 80)}`);
 
-      const result = await scanPage(browser, url, keywords, {
+      const activeBrowser = await ensureBrowser();
+      const result = await scanPage(activeBrowser, url, keywords, {
         ...options,
         screenshotsDir,
       });
 
       if (result.error) {
         allErrors.push({ url: result.url, error: result.error });
-      } else {
-        allMatches.push(...result.matches);
+      }
+      // Collect matches even if there was an error (partial results)
+      if (result.matches.length > 0) {
+        for (const m of result.matches) allMatches.push(m);
       }
     });
 
-    process.stdout.write('\n');
+    process.stdout.write(`${CLEAR_LINE}`);
   } finally {
     await browser.close().catch(() => {});
   }

@@ -36,13 +36,12 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
       if (classes.length > 0) {
         part += '.' + classes.map((c) => CSS.escape(c)).join('.');
         parts.unshift(part);
-        // Don't stop — add parent context too (up to 3 levels)
         if (parts.length >= 3) break;
         node = node.parentElement;
         continue;
       }
 
-      // Fall back to nth-child
+      // Fall back to nth-of-type (counts siblings of same tag, not all children)
       const siblings = node.parentElement
         ? Array.from(node.parentElement.children).filter(
             (c) => c.tagName === node.tagName,
@@ -51,7 +50,7 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
 
       if (siblings.length > 1) {
         const idx = siblings.indexOf(node) + 1;
-        part += `:nth-child(${idx})`;
+        part += `:nth-of-type(${idx})`;
       }
 
       parts.unshift(part);
@@ -81,15 +80,10 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
   function getTextNodes(root, limit) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        // Skip script / style / hidden
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
         const tag = parent.tagName;
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') {
-          return NodeFilter.FILTER_REJECT;
-        }
-        const style = window.getComputedStyle(parent);
-        if (style.display === 'none' || style.visibility === 'hidden') {
           return NodeFilter.FILTER_REJECT;
         }
         if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
@@ -105,6 +99,17 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
     return nodes;
   }
 
+  // ── Visibility check (only called on matched elements) ─────────────────
+
+  function isVisible(el) {
+    try {
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    } catch {
+      return true;
+    }
+  }
+
   // ── Main search ────────────────────────────────────────────────────────────
 
   const root = document.querySelector(selector) || document.body;
@@ -115,7 +120,6 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
   const flags = ignoreCase ? 'gi' : 'g';
 
   for (const keyword of keywords) {
-    // Escape regex special chars
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(escaped, flags);
 
@@ -126,6 +130,7 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
       while ((m = re.exec(text)) !== null) {
         const parent = textNode.parentElement;
         if (!parent) continue;
+        if (!isVisible(parent)) continue;
 
         const sel = buildSelector(parent);
         const rawHTML = parent.outerHTML;
@@ -162,12 +167,17 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
 export async function searchPage(page, pageUrl, keywords, opts) {
   const { ignoreCase = true, selector = 'body' } = opts;
 
-  const rawMatches = await page.evaluate(browserSearch, {
-    keywords,
-    ignoreCase,
-    selector,
-    maxNodes: 500,
-  });
+  const rawMatches = await Promise.race([
+    page.evaluate(browserSearch, {
+      keywords,
+      ignoreCase,
+      selector,
+      maxNodes: 500,
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Keyword search timed out after 30s')), 30000),
+    ),
+  ]);
 
   return rawMatches.map((m) => ({
     url: pageUrl,
@@ -176,7 +186,7 @@ export async function searchPage(page, pageUrl, keywords, opts) {
     selector: m.selector,
     nodeHTML: m.nodeHTML,
     context: m.context,
-    screenshotFile: null, // populated later by screenshotter
+    screenshotFile: null,
   }));
 }
 
@@ -192,35 +202,55 @@ export async function searchHtml(html, pageUrl, keywords, opts) {
 
   const root = $(selector).length ? $(selector) : $('body');
 
-  root.find('*').addBack().each((_i, el) => {
-    if (['script', 'style', 'noscript'].includes(el.type)) return;
-    // Only leaf-level text nodes
-    const children = $(el).contents().filter((_j, n) => n.nodeType === 3);
-    if (children.length === 0) return;
+  // Build a set of elements that are the deepest match for each keyword hit,
+  // so we don't report the same text from parent AND child.
+  const matchedSet = new Set();
 
-    const text = $(el).text();
+  root.find('*').addBack().each((_i, el) => {
+    const tagName = el.name || '';
+    if (['script', 'style', 'noscript'].includes(tagName)) return;
+
+    // Only consider elements with direct text node children
+    const hasDirectText = $(el)
+      .contents()
+      .toArray()
+      .some((n) => n.nodeType === 3 && n.data && n.data.trim());
+    if (!hasDirectText) return;
+
+    // Skip if a child element already matched (walk is depth-last, so
+    // leaf elements are visited first; reverse the selection to go leaves-first)
+    const directText = $(el)
+      .contents()
+      .filter((_j, n) => n.nodeType === 3)
+      .text();
+    if (!directText.trim()) return;
 
     for (const keyword of keywords) {
       const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(escaped, flags);
       let m;
       re.lastIndex = 0;
-      while ((m = re.exec(text)) !== null) {
+      while ((m = re.exec(directText)) !== null) {
+        // Dedup key: element + keyword + match index
+        const dedup = `${_i}:${keyword}:${m.index}`;
+        if (matchedSet.has(dedup)) continue;
+        matchedSet.add(dedup);
+
         const start = Math.max(0, m.index - 100);
-        const end = Math.min(text.length, m.index + m[0].length + 100);
+        const end = Math.min(directText.length, m.index + m[0].length + 100);
         let context = '';
         if (start > 0) context += '…';
-        context += text.slice(start, m.index);
+        context += directText.slice(start, m.index);
         context += `**${m[0]}**`;
-        context += text.slice(m.index + m[0].length, end);
-        if (end < text.length) context += '…';
+        context += directText.slice(m.index + m[0].length, end);
+        if (end < directText.length) context += '…';
 
         const rawHTML = $.html(el);
         matches.push({
           url: pageUrl,
           keyword,
           matchedText: m[0],
-          selector: el.attribs?.id ? `#${el.attribs.id}` : el.tagName || 'unknown',
+          selector: el.attribs?.id ? `#${el.attribs.id}` : tagName || 'unknown',
           nodeHTML: rawHTML.length > 500 ? rawHTML.slice(0, 497) + '…' : rawHTML,
           context,
           screenshotFile: null,
