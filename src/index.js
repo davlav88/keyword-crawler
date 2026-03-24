@@ -54,7 +54,6 @@ async function main() {
     .option('--urls <file>', 'CSV file with one URL per row')
     .option('--keywords <file>', 'CSV file with keywords/phrases (required)')
     // Crawl behaviour
-    .option('--depth <n>', 'Max link-crawl depth', (v) => parseInt(v, 10), 3)
     .option('--concurrency <n>', 'Max concurrent pages', (v) => parseInt(v, 10), 3)
     .option('--delay <ms>', 'Delay between requests (ms)', (v) => parseInt(v, 10), 500)
     // Matching
@@ -130,8 +129,6 @@ async function main() {
   // ── Phase 1: Discovery ────────────────────────────────────────────────────────
 
   const discoveryOptions = {
-    depth: opts.depth,
-    delay: opts.delay,
     output: outputDir,
     verbose: opts.verbose,
   };
@@ -191,7 +188,6 @@ async function main() {
     },
     totalMatches: matches.length,
     options: {
-      depth: opts.depth,
       concurrency: opts.concurrency,
       delay: opts.delay,
       ignoreCase: opts.ignoreCase,

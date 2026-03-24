@@ -8,11 +8,8 @@ import {
   isHtmlUrl,
   isSameOrigin,
   fetchWithTimeout,
-  checkRobots,
-  sleep,
   log,
   verbose,
-  warn,
 } from './utils.js';
 
 // ── Sitemap parsing ───────────────────────────────────────────────────────────
@@ -100,74 +97,18 @@ async function getSitemapUrlsFromRobots(origin) {
   }
 }
 
-// ── Link crawling ─────────────────────────────────────────────────────────────
-
-const HREF_RE = /href=["']([^"'#][^"']*?)["']/gi;
-
-async function crawlLinks(seedUrl, maxDepth, delay, knownUrls, onDiscover) {
-  const queue = [{ url: seedUrl, depth: 0 }];
-  const visited = new Set(knownUrls); // Don't re-visit sitemap URLs
-  visited.add(normalizeUrl(seedUrl, seedUrl));
-
-  while (queue.length > 0) {
-    const { url, depth } = queue.shift();
-
-    // robots.txt check (warn only)
-    const allowed = await checkRobots(url);
-    if (!allowed) {
-      warn(`robots.txt disallows: ${url} — skipping`);
-      continue;
-    }
-
-    try {
-      verbose(`Crawling: ${url} (depth ${depth})`);
-      await sleep(delay);
-
-      const resp = await fetchWithTimeout(url, 15000);
-      if (!resp.ok) continue;
-
-      const ct = resp.headers.get('content-type') || '';
-      if (!ct.includes('text/html')) continue;
-
-      // Handle redirect: check final URL is same origin
-      const finalUrl = resp.url ? normalizeUrl(resp.url, url) : url;
-      if (finalUrl && !isSameOrigin(finalUrl, seedUrl)) continue;
-
-      const html = await resp.text();
-
-      if (depth >= maxDepth) continue;
-
-      for (const match of html.matchAll(HREF_RE)) {
-        const link = normalizeUrl(match[1], url);
-        if (!link) continue;
-        if (visited.has(link)) continue;
-        if (!isSameOrigin(link, seedUrl)) continue;
-        if (!isHtmlUrl(link)) continue;
-
-        visited.add(link);
-        onDiscover(link);
-        queue.push({ url: link, depth: depth + 1 });
-      }
-    } catch (err) {
-      verbose(`Crawl error on ${url}: ${err.message}`);
-    }
-  }
-}
-
 // ── Phase 1 entry point ───────────────────────────────────────────────────────
 
 export async function discoverUrls(seedUrls, options) {
-  const { depth, delay, output } = options;
+  const { output } = options;
 
   const allUrls = new Set();
   let totalSitemapRaw = 0;
-  let totalCrawled = 0;
   let totalFilteredOut = 0;
 
   for (const seedUrl of seedUrls) {
     const origin = new URL(seedUrl).origin;
 
-    // ── Sitemap ──────────────────────────────────────────────────────────────
     log(`\nFetching sitemaps for ${origin}...`);
 
     // Check robots.txt for Sitemap: directives first
@@ -193,46 +134,29 @@ export async function discoverUrls(seedUrls, options) {
       if (!allUrls.has(normalized)) {
         allUrls.add(normalized);
         sitemapAdded++;
+        process.stdout.write(`\r  Found: ${allUrls.size} URLs`);
       }
     }
-    verbose(`Sitemap: ${sitemapAdded} new URLs added (${sitemapRaw.length} raw)`);
-
-    // ── Link crawling ────────────────────────────────────────────────────────
-    log(`Link-crawling from ${seedUrl} (depth=${depth})...`);
-    const sizeBefore = allUrls.size;
-
-    await crawlLinks(
-      normalizeUrl(seedUrl, seedUrl),
-      depth,
-      delay,
-      allUrls,
-      (url) => {
-        allUrls.add(url);
-        process.stdout.write(`\r  Discovered: ${allUrls.size} URLs`);
-      },
-    );
-
     process.stdout.write('\n');
-    totalCrawled += allUrls.size - sizeBefore;
+    verbose(`Sitemap: ${sitemapAdded} new URLs added (${sitemapRaw.length} raw)`);
   }
 
   const urlList = [...allUrls];
 
   // Save discovered URLs to file
-  const outputDir = output;
-  await fs.mkdir(outputDir, { recursive: true });
+  await fs.mkdir(output, { recursive: true });
   await fs.writeFile(
-    path.join(outputDir, 'discovered-urls.txt'),
+    path.join(output, 'discovered-urls.txt'),
     urlList.join('\n') + '\n',
     'utf-8',
   );
-  verbose(`Saved discovered URLs to ${path.join(outputDir, 'discovered-urls.txt')}`);
+  verbose(`Saved discovered URLs to ${path.join(output, 'discovered-urls.txt')}`);
 
   return {
     urls: urlList,
     stats: {
       sitemapUrls: totalSitemapRaw,
-      crawledUrls: totalCrawled,
+      crawledUrls: 0,
       totalUniqueUrls: urlList.length,
       filteredOut: totalFilteredOut,
     },

@@ -52,7 +52,6 @@ export async function writeCsvReport(outputDir, matches) {
 export function printDiscoverySummary(stats, urlsToScan) {
   log('\n── Phase 1: Discovery ──');
   log(`  Sitemap URLs found: ${stats.sitemapUrls}`);
-  log(`  Crawled URLs found: ${stats.crawledUrls}`);
   log(`  Total unique URLs:  ${stats.totalUniqueUrls}`);
   log(`  Filtered out:       ${stats.filteredOut} (non-HTML / off-domain)`);
   log(`  URLs to scan:       ${urlsToScan}`);

@@ -28,7 +28,6 @@ node src/index.js [options]
 | `--url <url>` | — | Single seed URL to crawl |
 | `--urls <file>` | — | CSV file with one URL per row |
 | `--keywords <file>` | — | CSV file with keywords/phrases **(required)** |
-| `--depth <n>` | `3` | Max link-crawl depth |
 | `--concurrency <n>` | `3` | Max concurrent pages |
 | `--delay <ms>` | `500` | Delay between requests (polite crawling) |
 | `--ignore-case` / `--no-ignore-case` | `true` | Case-insensitive matching |
@@ -79,12 +78,12 @@ node src/index.js --url https://example.com --keywords ./kw.csv --yes --verbose
 
 ### Phase 1 — Discovery
 
-Builds a complete URL inventory for each seed domain before any scanning begins:
+Builds a URL inventory exclusively from the site's declared sitemap — no link crawling, no undeclared pages:
 
-1. Fetches `sitemap.xml` (and any linked sitemap index files, including `.xml.gz`)
-2. Checks `robots.txt` for additional `Sitemap:` directives
-3. Crawls `<a href>` links from the seed URL up to `--depth` levels deep
-4. Merges and deduplicates both sources, filters out non-HTML resources
+1. Checks `robots.txt` for `Sitemap:` directives
+2. Fetches `sitemap.xml` (falls back to `/sitemap.xml` if robots.txt has none)
+3. Recursively resolves sitemap index files and `.xml.gz` compressed sitemaps
+4. Normalizes and deduplicates all `<loc>` URLs, filters out non-HTML resources
 5. Saves the full URL list to `<output>/discovered-urls.txt`
 
 ### Phase 2 — Scanning
