@@ -48,27 +48,43 @@ async function loadPage(browser, url, delay) {
   try {
     await sleep(delay);
 
-    const response = await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
-    });
+    // Phase 1: navigate and wait for the initial HTML response.
+    // Use 'domcontentloaded' so we aren't blocked by persistent background
+    // network activity (analytics, chat widgets, etc.).
+    let response;
+    try {
+      response = await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+    } catch (navErr) {
+      // Navigation threw (e.g. net::ERR_*). If the page is already showing
+      // content (redirected to a usable URL), try to continue anyway.
+      if (!page.url() || page.url() === 'about:blank') throw navErr;
+      verbose(`Navigation warning on ${url}: ${navErr.message} — attempting scan on partial load`);
+    }
 
-    if (!response) throw new Error('No response');
+    if (response) {
+      const status = response.status();
+      if (status >= 400) throw new Error(`HTTP ${status}`);
 
-    const status = response.status();
-    if (status >= 400) throw new Error(`HTTP ${status}`);
-
-    // Check Content-Type — skip non-HTML
-    const contentType = response.headers()['content-type'] || '';
-    if (!contentType.includes('text/html')) {
-      throw new Error(`Non-HTML content-type: ${contentType}`);
+      const contentType = response.headers()['content-type'] || '';
+      if (!contentType.includes('text/html')) {
+        throw new Error(`Non-HTML content-type: ${contentType}`);
+      }
     }
 
     // Check final URL (redirect) — must stay same origin
     const finalUrl = page.url();
+    if (!finalUrl || finalUrl === 'about:blank') throw new Error('No response');
     if (new URL(finalUrl).hostname !== new URL(url).hostname) {
       throw new Error(`Redirect to different origin: ${finalUrl}`);
     }
+
+    // Phase 2: give JS a moment to render without hard-blocking on network idle.
+    await page.waitForNetworkIdle({ idleTime: 1000, timeout: 5000 }).catch(() => {
+      verbose(`Network did not idle on ${url} — proceeding with current DOM`);
+    });
 
     // Try to dismiss cookie banners
     await dismissCookieBanner(page);
