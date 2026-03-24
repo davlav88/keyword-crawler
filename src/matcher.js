@@ -136,12 +136,13 @@ function browserSearch({ keywords, ignoreCase, selector, maxNodes }) {
         if (!parent) continue;
         if (!isVisible(parent)) continue;
 
-        // Tag the element with a unique ID so screenshots can reliably find it
-        const id = `kc-${matchId++}`;
-        parent.setAttribute('data-kc-match', id);
-
         const sel = buildSelector(parent);
         const rawHTML = parent.outerHTML;
+
+        // Tag the element with a unique ID so screenshots can reliably find it
+        // (after capturing outerHTML so the tag doesn't pollute nodeHTML)
+        const id = `kc-${matchId++}`;
+        parent.setAttribute('data-kc-match', id);
         const nodeHTML = rawHTML.length > 500 ? rawHTML.slice(0, 497) + '…' : rawHTML;
         const context = buildContext(text, m.index, m[0].length);
 
